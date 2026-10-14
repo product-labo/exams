@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Wallet Results</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --ink:#1b1f2a; --muted:#667085; --accent:#3b5bdb; --ok:#2b8a3e; --bad:#c92a2a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12141a; --card:#1c1f28; --ink:#eceef5; --muted:#9aa3b5; --accent:#7c93ff; --ok:#69db7c; --bad:#ff8787; } }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, sans-serif; }
+  main { max-width:900px; margin:0 auto; padding:24px 16px; }
+  a { color:var(--accent); }
+  h1 { font-size:22px; margin:8px 0 0; }
+  .addr { font-family:ui-monospace, monospace; word-break:break-all; color:var(--muted); }
+  button { font:inherit; padding:8px 12px; border-radius:8px; border:1px solid #8884; background:var(--card); color:var(--ink); cursor:pointer; }
+  .wrap { overflow-x:auto; background:var(--card); border-radius:12px; margin-top:16px; }
+  table { border-collapse:collapse; width:100%; min-width:600px; }
+  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid #8883; }
+  th { color:var(--muted); font-weight:600; font-size:13px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <a href="/results.html">← All results</a>
+  <h1>Exam results</h1>
+  <div class="addr" id="addr"></div>
+  <div class="wrap"><table>
+    <thead><tr><th>Student</th><th>Course</th><th>Score</th><th>%</th><th>Completed</th><th>Blockchain</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const address = location.pathname.slice(1);
+$('addr').textContent = address;
+document.title = 'Results ' + address.slice(0, 8) + '…';
+fetch('/api/wallets/' + address + '/results').then((r) => r.json()).then(({ results, explorerTxUrl }) => {
+  $('rows').innerHTML = results.map((r) => `<tr>
+    <td>${esc(r.full_name)}</td><td>${esc(r.course)}</td><td>${r.score}/${r.total_possible}</td><td>${r.percentage}%</td>
+    <td>${new Date(r.completed_at).toLocaleString()}</td>
+    <td>${r.tx_hash && explorerTxUrl ? `<a href="${explorerTxUrl}${r.tx_hash}" target="_blank" rel="noopener">tx</a> · ` : ''}<button data-id="${r.session_id}">Verify</button> <span id="v-${r.session_id}"></span></td></tr>`).join('')
+    || '<tr><td colspan="6">No paid results for this wallet yet.</td></tr>';
+});
+$('rows').onclick = async (e) => {
+  const id = e.target.dataset.id; if (!id) return;
+  const out = document.getElementById('v-' + id); out.textContent = '…';
+  const v = await fetch(`/api/results/${id}/verify`).then((r) => r.json());
+  out.innerHTML = v.onChain === true && v.hashMatchesStored ? '<span class="ok">✔ matches on-chain</span>'
+    : v.onChain === 'chain-not-configured' ? '<span>chain not configured</span>' : '<span class="bad">✘ not verified</span>';
+};
+</script>
+</body>
+</html>

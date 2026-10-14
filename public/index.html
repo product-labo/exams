@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Voice Exam</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --ink:#1b1f2a; --muted:#667085; --accent:#3b5bdb; --ok:#2b8a3e; --bad:#c92a2a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12141a; --card:#1c1f28; --ink:#eceef5; --muted:#9aa3b5; --accent:#7c93ff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:18px/1.5 system-ui, sans-serif; }
+  main { max-width:720px; margin:0 auto; padding:24px 16px 64px; }
+  nav { display:flex; gap:16px; justify-content:flex-end; font-size:14px; }
+  a { color:var(--accent); }
+  .card { background:var(--card); border-radius:16px; padding:24px; margin-top:16px; box-shadow:0 1px 3px #0002; }
+  h1 { margin:8px 0 0; font-size:28px; }
+  select, input, button { font:inherit; padding:12px 14px; border-radius:10px; border:1px solid #8884; background:var(--card); color:var(--ink); }
+  button.primary { background:var(--accent); color:#fff; border:0; cursor:pointer; }
+  button:disabled { opacity:.5; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .row > input { flex:1; min-width:180px; }
+  .q { font-size:24px; font-weight:600; }
+  .opt { padding:12px 16px; border:1px solid #8884; border-radius:10px; margin-top:8px; }
+  .timer { height:10px; border-radius:5px; background:#8883; overflow:hidden; margin-top:16px; }
+  .timer > div { height:100%; background:var(--accent); width:100%; transition:width .2s linear; }
+  .status { margin-top:12px; color:var(--muted); min-height:1.5em; }
+  .mic { display:inline-block; width:12px; height:12px; border-radius:50%; background:#8885; margin-right:8px; }
+  .mic.on { background:var(--bad); animation:pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity:.3; } }
+  .hidden { display:none; }
+  .myrow { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px 0; border-top:1px solid #8883; }
+</style>
+</head>
+<body>
+<main>
+  <nav><a href="/results.html">Results</a><a href="/admin.html">Admin</a></nav>
+  <h1>Voice Exam</h1>
+
+  <section id="setup" class="card">
+    <label>Course<br><select id="course"></select></label>
+    <label style="display:block;margin-top:12px">Your full name <small>(optional: leave blank and the agent will ask you to say it)</small><br><input id="name" autocomplete="name" style="width:100%"></label>
+    <label style="display:block;margin-top:12px">Voice speed (how fast questions are read aloud)<br><select id="rate"><option value="0.9">Slower</option><option value="1">Normal</option><option value="1.2">Faster</option><option value="1.4">Fastest</option></select></label>
+    <div class="row"><button id="connect" class="primary">Connect wallet &amp; sign in</button><button id="start" disabled>Start exam (voice)</button></div>
+    <div class="row"><button id="micTestBtn">Test my microphone</button></div>
+    <div id="micPanel" class="hidden" style="margin-top:12px">
+      <div class="status">Microphone in use: <b id="micName">-</b></div>
+      <div class="timer"><div id="meterBar" style="width:0%"></div></div>
+      <div class="status" id="micAdvice" style="color:var(--ink)"></div>
+      <div class="status" id="micHeard"></div>
+      <div class="status" style="font-size:14px">The browser uses your computer's <b>default</b> microphone. To change it: Windows Settings &rarr; System &rarr; Sound &rarr; Input. To raise its volume: the same screen, "Input volume".</div>
+    </div>
+    <p class="status" id="wallet"></p>
+    <div id="myExams" class="hidden" style="margin-top:16px"><h3 style="margin:0 0 4px;font-size:18px">My exams</h3><div id="myExamsList"></div></div>
+    <p class="status" id="support"></p>
+  </section>
+
+  <section id="exam" class="card hidden">
+    <div id="progress" class="status"></div>
+    <div id="question" class="q"></div>
+    <div id="options"></div>
+    <div class="timer"><div id="bar"></div></div>
+    <div class="status"><span id="mic" class="mic"></span><span id="status"></span></div>
+    <div class="status" id="micNote" style="color:var(--bad)"></div>
+    <div class="row hidden" id="errRow"><button id="backBtn" class="primary">Back to start</button></div>
+    <div class="row">
+      <input id="typed" placeholder="Type your answer if voice isn't working (e.g. B)" autocomplete="off">
+      <button id="send">Send</button>
+    </div>
+  </section>
+
+  <section id="done" class="card hidden">
+    <div class="q" id="score"></div>
+    <div id="payBox" class="hidden">
+      <p>Your exam is complete. Pay <b id="feeText">0.10 USDC</b> with your wallet to record your result on the Base blockchain and reveal your score.</p>
+      <div class="row"><button id="pay" class="primary">Submit result &amp; pay</button></div>
+      <p class="status" id="payStatus"></p>
+      <p class="status">Unpaid results expire <span id="expires"></span>.</p>
+    </div>
+    <p class="status hidden" id="shareBox">Your public result page: <a id="resultLink" href="#"></a></p>
+    <div class="row"><button id="another" class="primary">Take another exam</button></div>
+    <p class="status">You can take any course again, or a different one. Your results are kept under "My exams".</p>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+<script src="/wallet.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const synth = window.speechSynthesis;
+let sessionId = null, typedResolve = null, lastTyped = false, lastAlternatives = [];
+
+$('support').textContent = SR ? '' : 'Speech recognition is not supported in this browser. Use Chrome or Edge, or type your answers.';
+
+const api = (path, body, method = 'POST') => fetch(path, { method, headers: { 'Content-Type': 'application/json', ...authHeaders() }, body: method === 'GET' ? undefined : JSON.stringify(body || {}) })
+  .then(async (r) => { const t = await r.text(); let j = {}; try { j = t ? JSON.parse(t) : {}; } catch {} if (!r.ok) throw new Error(j.error || ('The server answered with an error (' + r.status + ').')); return j; });
+
+// ---- audio ----
+function speak(text) {
+  $('status').textContent = 'Speaking…';
+  return new Promise((resolve) => {
+    if (!synth) return resolve();
+    // Some browsers never fire "end"; don't let the exam freeze (generous upper bound for slow voices).
+    const rate = Number($('rate').value) || 1;
+    const guard = setTimeout(resolve, (2000 + text.length * 85) / rate);
+    const finish = () => { clearTimeout(guard); resolve(); };
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = rate;
+    u.onend = u.onerror = finish;
+    synth.speak(u);
+  });
+}
+
+const lastReport = {};
+function reportVoice(kind, detail = '') {
+  if (!sessionId) return;
+  const now = Date.now();
+  if (now - (lastReport[kind] || 0) < 10000) return; // at most one report of each kind per 10 s
+  lastReport[kind] = now;
+  api('/api/sessions/' + sessionId + '/voice-event', { kind, detail }).catch(() => {});
+}
+
+const MIC_ERRORS = {
+  'no-speech': "I didn't hear anything. Check that your microphone is on and not muted.",
+  'audio-capture': 'No microphone was found.',
+  network: 'The speech service could not be reached. Voice needs an internet connection.',
+  'not-allowed': 'The microphone is blocked. Allow it (lock icon next to the address bar) and reload, or type your answers below.',
+  'service-not-allowed': 'The microphone is blocked. Allow it (lock icon next to the address bar) and reload, or type your answers below.',
+};
+
+// Resolves with a transcript, or '' if nothing was heard before `ms` elapsed. Typed input also resolves it (lastTyped = true).
+function listenOnce(ms) {
+  return new Promise((resolve) => {
+    let rec, finished = false;
+    const done = (t, typed = false, alts = []) => { if (finished) return; finished = true; lastTyped = typed; lastAlternatives = alts; typedResolve = null; document.body.dataset.listening = '0'; $('mic').classList.remove('on'); try { rec && rec.abort(); } catch {} resolve(t); };
+    typedResolve = (t) => done(t, true); document.body.dataset.listening = '1';
+    setTimeout(() => done(''), ms);
+    if (!SR) return;
+    rec = new SR();
+    rec.lang = 'en-US'; rec.interimResults = true; rec.maxAlternatives = 5;
+    rec.onresult = (e) => {
+      const r = e.results[e.results.length - 1];
+      if (r.isFinal) done(r[0].transcript, false, Array.from(r).map((a) => a.transcript));
+      else $('status').textContent = 'Hearing: ' + r[0].transcript;
+    };
+    rec.onerror = (e) => {
+      reportVoice(e.error);
+      const msg = MIC_ERRORS[e.error];
+      if (msg) $('status').textContent = msg;
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') return; // keep waiting for typed input
+      done('');
+    };
+    rec.onend = () => setTimeout(() => done(''), 300); // brief pause so a failing recognizer can't spin
+    rec.onstart = () => { $('mic').classList.add('on'); $('status').textContent = 'Listening… speak now'; };
+    try { rec.start(); } catch { done(''); }
+  });
+}
+
+try { $('rate').value = localStorage.getItem('rate') || '1'; } catch {}
+$('rate').onchange = () => { try { localStorage.setItem('rate', $('rate').value); } catch {} };
+$('micTestBtn').onclick = () => micTest().catch((e) => { $('micAdvice').textContent = 'Microphone test failed: ' + e.message; });
+$('send').onclick = submitTyped;
+$('typed').onkeydown = (e) => { if (e.key === 'Enter') submitTyped(); };
+function submitTyped() {
+  const t = $('typed').value.trim(); $('typed').value = '';
+  if (t && typedResolve) typedResolve(t);
+}
+
+// ---- microphone check: which mic, how loud, and what the speech engine heard ----
+function micErrorText(e) {
+  if (e && e.name === 'NotAllowedError') return 'The microphone is blocked. Click the lock icon next to the address bar, allow the microphone, then reload. You can still type your answers.';
+  if (e && e.name === 'NotFoundError') return 'No microphone was found. Plug one in or check Windows Sound settings. You can still type your answers.';
+  return 'The microphone could not be opened. You can still type your answers.';
+}
+
+async function micTest() {
+  $('micPanel').classList.remove('hidden');
+  $('micHeard').textContent = ''; $('meterBar').style.width = '0%'; $('micName').textContent = '-';
+  if (!navigator.mediaDevices?.getUserMedia) { $('micAdvice').textContent = 'This browser cannot open the microphone on this page. Use Chrome or Edge, or type your answers.'; return; }
+  $('micAdvice').textContent = 'Allow the microphone if asked, then say "option B" in your normal voice, sitting where you will take the exam.';
+  let stream, ctx, raf, stopped = false, peak = 0;
+  const cleanup = () => { stopped = true; cancelAnimationFrame(raf); try { stream && stream.getTracks().forEach((t) => t.stop()); } catch {} try { ctx && ctx.close(); } catch {} };
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { $('micAdvice').textContent = micErrorText(e); return; }
+  $('micName').textContent = stream.getAudioTracks()[0]?.label || 'default microphone';
+
+  const AC = window.AudioContext || window.webkitAudioContext;
+  ctx = new AC();
+  const an = ctx.createAnalyser(); an.fftSize = 1024;
+  ctx.createMediaStreamSource(stream).connect(an);
+  const buf = new Float32Array(an.fftSize);
+  const tick = () => {
+    if (stopped) return;
+    an.getFloatTimeDomainData(buf);
+    let sum = 0; for (const v of buf) sum += v * v;
+    const rms = Math.sqrt(sum / buf.length);
+    peak = Math.max(peak, rms);
+    $('meterBar').style.width = Math.min(100, rms * 400) + '%';
+    raf = requestAnimationFrame(tick);
+  };
+  tick();
+
+  // Let the speech engine try too, so the student sees what it actually understood.
+  const heard = await new Promise((resolve) => {
+    if (!SR) return resolve(null);
+    const rec = new SR();
+    rec.lang = 'en-US'; rec.maxAlternatives = 3; rec.interimResults = false;
+    const timer = setTimeout(() => { try { rec.abort(); } catch {} resolve(null); }, 9000);
+    rec.onresult = (e) => { clearTimeout(timer); resolve(Array.from(e.results[0]).map((a) => ({ t: a.transcript, c: a.confidence }))); };
+    rec.onerror = (e) => { clearTimeout(timer); resolve({ error: e.error }); };
+    try { rec.start(); } catch { clearTimeout(timer); resolve(null); }
+  });
+  await new Promise((r) => setTimeout(r, 400));
+  cleanup();
+
+  let advice;
+  if (peak < 0.015) advice = 'I hardly heard any sound. Check the microphone is not muted, that the right one is selected (see the note below), and raise its input volume.';
+  else if (peak < 0.04) advice = 'Your voice is very quiet for the microphone. Move closer (about a hand-width away), or raise the input volume in Windows Sound settings. This is the usual reason for having to shout.';
+  else if (peak < 0.08) advice = 'Your level is a little low. It may work, but moving closer or raising the input volume will help.';
+  else advice = 'Your volume level is good.';
+  if (heard && heard.error === 'not-allowed') advice = micErrorText({ name: 'NotAllowedError' });
+  else if (heard && heard.error === 'network') advice += ' The speech service could not be reached: voice needs an internet connection.';
+  else if (!heard || heard.error) advice += ' The speech service did not return any words. Say "option B" a bit after pressing the button.';
+  $('micAdvice').textContent = advice;
+  $('micHeard').textContent = Array.isArray(heard) && heard.length
+    ? 'It heard: ' + heard.map((a) => `"${a.t}"` + (a.c ? ` (${Math.round(a.c * 100)}%)` : '')).join(', ')
+    : '';
+}
+
+// ---- registration by voice (or typing) ----
+async function checkMic() {
+  if (!navigator.mediaDevices?.getUserMedia) return 'This browser cannot open the microphone here. You can type your answers.';
+  try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach((t) => t.stop()); return ''; }
+  catch (e) { return micErrorText(e); }
+}
+
+async function askName() {
+  const typedPlaceholder = $('typed').placeholder;
+  $('typed').placeholder = 'Or type your full name here, then press Send';
+  try {
+    for (let attempt = 0; ; attempt++) {
+      await speak(attempt ? 'Please say your full name again, or type it in the box.' : 'Welcome. Please say your full name now, or type it in the box.');
+      const name = (await listenOnce(15000)).trim();
+      if (!name) { await speak(attempt >= 1 ? 'I still could not hear you. You can type your name in the box below.' : 'I did not hear a name.'); continue; }
+      if (lastTyped) return name; // typed names need no confirmation
+      $('status').textContent = `Heard: ${name}`;
+      await speak(`I heard ${name}. Is that correct? Say yes or no, or type the correct name.`);
+      const yn = (await listenOnce(10000)).trim();
+      if (lastTyped && !/^(yes|y|no|n)$/i.test(yn)) return yn; // a typed correction
+      if (/\b(yes|yeah|yep|yup|correct|right)\b/i.test(yn)) return name;
+    }
+  } finally { $('typed').placeholder = typedPlaceholder; }
+}
+
+// ---- countdown ----
+let tick;
+function startCountdown(msLeft, totalMs) {
+  clearInterval(tick);
+  const end = Date.now() + msLeft;
+  const draw = () => { $('bar').style.width = Math.max(0, ((end - Date.now()) / totalMs) * 100) + '%'; };
+  draw(); tick = setInterval(draw, 200);
+}
+
+// ---- exam loop ----
+async function runExam(secondsPerQuestion) {
+  for (;;) {
+    const n = await api(`/api/sessions/${sessionId}/next`);
+    if (n.done) return finish(n);
+    $('progress').textContent = `Question ${n.position} of ${n.total}`;
+    $('question').textContent = n.question;
+    $('options').innerHTML = n.options.map((o, i) => `<div class="opt"><b>${'ABCD'[i]}.</b> ${esc(o)}</div>`).join('');
+    await speak(n.say);
+
+    let outcome = 'timeout', heard = false;
+    for (let again = true; again;) {
+      again = false;
+      const r = await api(`/api/sessions/${sessionId}/ready`);
+      startCountdown(r.msLeft, secondsPerQuestion * 1000);
+      const deadline = Date.now() + r.msLeft;
+      while (Date.now() < deadline) {
+        const text = await listenOnce(deadline - Date.now());
+        if (!text) continue;
+        heard = true;
+        const res = await api(`/api/sessions/${sessionId}/utterance`, { text, alternatives: lastAlternatives });
+        if (res.action === 'answered') { outcome = 'answered'; $('status').textContent = res.say; break; }
+        if (res.action === 'repeat') { await speak(res.say); again = true; break; }
+        if (res.action === 'unclear') { $('status').textContent = 'I did not catch that. Say it again, for example "option B".'; continue; } // shown, not spoken: speaking would use up the answer time
+        if (res.action === 'no_repeats') { await speak(res.say); continue; }
+        if (res.action === 'timeout') { outcome = 'timeout'; if (res.done) return finish(await api(`/api/sessions/${sessionId}/next`)); break; }
+      }
+    }
+    clearInterval(tick);
+    if (outcome === 'timeout') { $('status').textContent = 'Time is up.'; if (!heard) reportVoice('silent-question', 'question ' + n.position); }
+  }
+}
+
+async function finish(n) {
+  clearInterval(tick);
+  $('exam').classList.add('hidden'); $('done').classList.remove('hidden');
+  if (n.locked) { $('score').textContent = 'Exam complete'; await preparePayment(); await speak(n.say); }
+  else showRevealed(n.result);
+}
+
+function showRevealed(r) {
+  $('done').classList.remove('hidden'); $('exam').classList.add('hidden'); $('setup').classList.add('hidden');
+  $('payBox').classList.add('hidden'); $('shareBox').classList.remove('hidden');
+  $('score').textContent = `Score: ${r.score} / ${r.total} (${r.percentage}%)`;
+  const url = '/' + r.wallet;
+  $('resultLink').href = url; $('resultLink').textContent = location.origin + url;
+  speak(`You scored ${r.score} out of ${r.total}.`);
+}
+
+// ---- pay with USDC: approve (if needed) then payAndAnchor, then the server verifies it on-chain ----
+let payInfo = null;
+async function preparePayment() {
+  payInfo = await api('/api/sessions/' + sessionId + '/payment', null, 'GET');
+  if (payInfo.paid) { const r = await api('/api/sessions/' + sessionId + '/confirm', {}); return showRevealed(r); }
+  $('feeText').textContent = Number(ethers.formatUnits(payInfo.fee, 6)).toFixed(2) + ' USDC';
+  $('expires').textContent = 'on ' + new Date(payInfo.expiresAt).toLocaleDateString();
+  $('payBox').classList.remove('hidden');
+}
+$('pay').onclick = async () => {
+  const st = (m) => ($('payStatus').textContent = m);
+  $('pay').disabled = true;
+  try {
+    if (!payInfo) await preparePayment();
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const want = '0x' + payInfo.chainId.toString(16);
+    if ((await window.ethereum.request({ method: 'eth_chainId' })) !== want) {
+      await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: want }] });
+    }
+    const signer = await provider.getSigner();
+    if (walletSession().address.toLowerCase() !== (await signer.getAddress()).toLowerCase()) throw new Error('Switch your wallet back to the account you signed in with.');
+    const usdc = new ethers.Contract(payInfo.token, ['function allowance(address,address) view returns (uint256)', 'function approve(address,uint256) returns (bool)', 'function balanceOf(address) view returns (uint256)'], signer);
+    const reg = new ethers.Contract(payInfo.contract, ['function payAndAnchor(bytes32)'], signer);
+    const me = await signer.getAddress();
+    if ((await usdc.balanceOf(me)) < BigInt(payInfo.fee)) throw new Error('Not enough USDC on Base in this wallet.');
+    if ((await usdc.allowance(me, payInfo.contract)) < BigInt(payInfo.fee)) {
+      st('Approve the USDC payment in your wallet…');
+      await (await usdc.approve(payInfo.contract, payInfo.fee)).wait();
+    }
+    st('Confirm the payment in your wallet…');
+    const tx = await reg.payAndAnchor(payInfo.hash);
+    st('Waiting for the blockchain to confirm…');
+    await tx.wait();
+    st('Verifying payment…');
+    showRevealed(await api('/api/sessions/' + sessionId + '/confirm', { txHash: tx.hash }));
+  } catch (e) { st('Could not complete payment: ' + (e.shortMessage || e.message)); $('pay').disabled = false; }
+};
+
+// ---- leaving an exam, and the student's own exam list ----
+function backToStart() {
+  clearInterval(tick);
+  try { synth && synth.cancel(); } catch {}
+  sessionId = null; payInfo = null; typedResolve = null;
+  document.body.dataset.listening = '0';
+  for (const id of ['exam', 'done', 'errRow']) $(id).classList.add('hidden');
+  $('setup').classList.remove('hidden');
+  $('question').textContent = ''; $('options').innerHTML = ''; $('progress').textContent = ''; $('status').textContent = ''; $('micNote').textContent = '';
+  $('payStatus').textContent = ''; $('pay').disabled = false; $('payBox').classList.add('hidden'); $('shareBox').classList.add('hidden');
+  $('bar').style.width = '100%';
+  walletReady(); loadCourses(); loadMyExams();
+  window.scrollTo(0, 0);
+}
+
+async function loadMyExams() {
+  if (!walletSession()) { $('myExams').classList.add('hidden'); return; }
+  let data;
+  try { data = await api('/api/me/results', null, 'GET'); } catch { $('myExams').classList.add('hidden'); return; }
+  const d = (x) => new Date(x).toLocaleDateString();
+  $('myExams').classList.toggle('hidden', !data.results.length);
+  $('myExamsList').innerHTML = data.results.map((r) => r.paid
+    ? `<div class="myrow"><span>${esc(r.course)}: <b>${r.score}/${r.total} (${r.percentage}%)</b> <span class="status">${d(r.completedAt)}</span></span><a href="/${r.wallet}">public page</a></div>`
+    : `<div class="myrow"><span>${esc(r.course)}: finished ${d(r.completedAt)}. <b>Awaiting payment</b> <span class="status">(expires ${d(r.expiresAt)})</span></span><button data-pay="${r.sessionId}">Pay &amp; reveal</button></div>`).join('');
+}
+
+// Open the payment screen for an exam finished earlier.
+async function openPayment(id) {
+  sessionId = id; payInfo = null;
+  $('pay').disabled = false; $('payStatus').textContent = '';
+  $('setup').classList.add('hidden'); $('done').classList.remove('hidden');
+  $('payBox').classList.add('hidden'); $('shareBox').classList.add('hidden');
+  $('score').textContent = 'Exam complete';
+  try { await preparePayment(); }
+  catch (e) { $('score').textContent = 'This result can no longer be paid'; $('payStatus').textContent = e.message; }
+}
+
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+$('start').onclick = async () => {
+  $('start').disabled = true;
+  try {
+    const courseId = $('course').value;
+    $('setup').classList.add('hidden'); $('exam').classList.remove('hidden');
+    const micProblem = await checkMic(); // asks for permission now, while the click is fresh, instead of mid-sentence
+    $('micNote').textContent = micProblem;
+    const name = $('name').value.trim() || await askName();
+    const reg = await api('/api/register', { fullName: name, courseId });
+    sessionId = reg.sessionId;
+    await speak(reg.say);
+    await runExam(reg.secondsPerQuestion);
+  } catch (e) { $('status').textContent = 'Error: ' + e.message; $('errRow').classList.remove('hidden'); }
+};
+
+function walletReady() {
+  const w = walletSession();
+  $('wallet').textContent = w ? 'Signed in: ' + w.address : '';
+  $('start').disabled = !w || !$('course').value;
+  $('connect').classList.toggle('primary', !w);
+}
+$('connect').onclick = async () => { try { await walletLogin(); walletReady(); loadMyExams(); } catch (e) { $('wallet').textContent = e.message; } };
+
+function loadCourses() {
+  const keep = $('course').value;
+  return fetch('/api/courses').then((r) => r.json()).then((cs) => {
+    $('course').innerHTML = cs.map((c) => `<option value="${c.id}">${esc(c.title)} (${c.num_questions} questions)</option>`).join('');
+    if (keep && cs.some((c) => String(c.id) === keep)) $('course').value = keep;
+    $('support').textContent = cs.length ? '' : 'No courses are available yet.';
+    walletReady();
+  });
+}
+loadCourses().then(() => { loadMyExams(); });
+
+$('another').onclick = backToStart;
+$('backBtn').onclick = backToStart;
+$('myExamsList').onclick = (e) => { const id = e.target.dataset?.pay; if (id) openPayment(id); };
+</script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Exam Results</title>
+<style>
+  :root { --bg:#f6f7fb; --card:#fff; --ink:#1b1f2a; --muted:#667085; --accent:#3b5bdb; --ok:#2b8a3e; --bad:#c92a2a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12141a; --card:#1c1f28; --ink:#eceef5; --muted:#9aa3b5; --accent:#7c93ff; --ok:#69db7c; --bad:#ff8787; } }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:24px 16px; }
+  a { color:var(--accent); }
+  input, button { font:inherit; padding:10px 12px; border-radius:8px; border:1px solid #8884; background:var(--card); color:var(--ink); }
+  .wrap { overflow-x:auto; background:var(--card); border-radius:12px; margin-top:16px; }
+  table { border-collapse:collapse; width:100%; min-width:640px; }
+  th, td { padding:10px 12px; text-align:left; border-bottom:1px solid #8883; }
+  th { color:var(--muted); font-weight:600; font-size:13px; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <a href="/">← Take an exam</a>
+  <h1>Exam Results</h1>
+  <input id="q" placeholder="Search by name, wallet address or session ID">
+  <div class="wrap"><table>
+    <thead><tr><th>Student</th><th>Course</th><th>Score</th><th>%</th><th>Completed</th><th>Blockchain</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+async function load() {
+  const { results, explorerTxUrl } = await fetch('/api/results?q=' + encodeURIComponent($('q').value)).then((r) => r.json());
+  $('rows').innerHTML = results.map((r) => `<tr>
+    <td><a href="/${r.wallet}">${esc(r.full_name)}</a></td><td>${esc(r.course)}</td><td>${r.score}/${r.total_possible}</td><td>${r.percentage}%</td>
+    <td>${new Date(r.completed_at).toLocaleString()}</td>
+    <td>${r.tx_hash && explorerTxUrl ? `<a href="${explorerTxUrl}${r.tx_hash}" target="_blank" rel="noopener">tx</a> · ` : ''}<button data-id="${r.session_id}">Verify</button> <span id="v-${r.session_id}"></span></td></tr>`).join('')
+    || '<tr><td colspan="6">No results yet.</td></tr>';
+}
+$('rows').onclick = async (e) => {
+  const id = e.target.dataset.id; if (!id) return;
+  const out = document.getElementById('v-' + id); out.textContent = '…';
+  const v = await fetch(`/api/results/${id}/verify`).then((r) => r.json());
+  out.innerHTML = v.onChain === true && v.hashMatchesStored ? '<span class="ok">✔ matches on-chain</span>'
+    : v.onChain === 'chain-not-configured' ? '<span>chain not configured</span>'
+    : '<span class="bad">✘ not verified</span>';
+};
+let t; $('q').oninput = () => { clearTimeout(t); t = setTimeout(load, 250); };
+$('q').value = new URLSearchParams(location.search).get('q') || '';
+load();
+</script>
+</body>
+</html>
