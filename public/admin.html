@@ -122,15 +122,26 @@ async function api(method, path, body) {
   try { j = raw ? JSON.parse(raw) : {}; } catch { /* not JSON, handled below */ }
   if (!r.ok) {
     if (r.status === 413) throw new Error('That file is too large for the server (limit is about 40 MB).');
-    if (r.status === 401) throw new Error('Not signed in as admin. Press "Connect admin wallet" again.');
+    if (r.status === 401) {
+      try { sessionStorage.removeItem('walletSession'); } catch {}
+      $('who').textContent = '';
+      throw new Error('Your admin sign-in has expired or is not valid. Press "Connect admin wallet" and sign again.');
+    }
     throw new Error(j.error || `The server answered with an error (${r.status}).`);
   }
   return j;
 }
 const guard = (fn) => async (...args) => { try { await fn(...args); } catch (e) { say('Error: ' + e.message); } };
 
+let coursesError = null; // why the course list could not be loaded, if it could not
 async function loadCourses() {
-  const cs = await api('GET', '/api/admin/courses');
+  let cs;
+  try { cs = await api('GET', '/api/admin/courses'); coursesError = null; }
+  catch (e) {
+    coursesError = e.message; window.courses = undefined; $('course').innerHTML = '';
+    updateVisibility(undefined);
+    throw e;
+  }
   const cur = $('course').value;
   $('course').innerHTML = cs.map((c) => `<option value="${c.id}">${esc(c.title)} — ${c.approved} approved, ${c.drafts} drafts${c.approved === 0 ? ' — HIDDEN from students (needs approved questions)' : c.approved < c.num_questions ? ` — exams will have only ${c.approved} questions` : ''}</option>`).join('');
   if (cur) $('course').value = cur;
@@ -165,6 +176,7 @@ function updateVisibility(c) {
   const box = $('visibility'), btn = $('approveTop');
   btn.style.display = 'none';
   if (!c) {
+    if (coursesError) { box.innerHTML = '<b style="color:var(--bad)">Your courses could not be loaded.</b> ' + esc(coursesError); return; }
     box.innerHTML = (window.courses || []).length ? 'Select a course to see whether students can take it.' : '<b style="color:var(--bad)">No courses yet.</b> Create one in the "Add a new course" box below, then add its files or questions.';
     return;
   }
@@ -253,7 +265,8 @@ const cid = () => $('course').value;
 // Returns true (after telling the admin what to do) when no course is selected.
 function noCourse() {
   if (cid()) return false;
-  say((window.courses || []).length ? 'Select a course in the Course dropdown first.' : 'There are no courses yet. Create one in the "Add a new course" box at the top first, then add files or questions.');
+  if (coursesError) say('Your courses could not be loaded: ' + coursesError);
+  else say((window.courses || []).length ? 'Select a course in the Course dropdown first.' : 'There are no courses yet. Create one in the "Add a new course" box at the top first, then add files or questions.');
   return true;
 }
 
