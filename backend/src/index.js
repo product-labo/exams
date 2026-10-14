@@ -1,3 +1,4 @@
+import './config.js'; // must be first: applies defaults and validates the environment
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
