@@ -164,7 +164,10 @@ async function loadQuestions() {
 function updateVisibility(c) {
   const box = $('visibility'), btn = $('approveTop');
   btn.style.display = 'none';
-  if (!c) { box.textContent = 'Select a course to see whether students can take it.'; return; }
+  if (!c) {
+    box.innerHTML = (window.courses || []).length ? 'Select a course to see whether students can take it.' : '<b style="color:var(--bad)">No courses yet.</b> Create one in the "Add a new course" box below, then add its files or questions.';
+    return;
+  }
   const per = Math.min(c.num_questions, c.approved);
   if (c.approved > 0) {
     box.innerHTML = `<b style="color:var(--ok)">Visible to students.</b> ${c.approved} approved questions; each exam draws ${per} of them.` +
@@ -178,6 +181,7 @@ function updateVisibility(c) {
 }
 
 async function approveDrafts() {
+  if (noCourse()) return;
   const c = (window.courses || []).find((x) => String(x.id) === $('course').value);
   const n = qList.filter((x) => x.status === 'draft').length;
   if (!n) return say('There are no drafts to approve.');
@@ -235,6 +239,7 @@ $('createCourse').onclick = guard(async () => {
 });
 
 $('addQs').onclick = guard(async () => {
+  if (noCourse()) return;
   const text = $('json').value.trim();
   if (!text) return say('The box is empty. Paste your questions as JSON first, for example: [{"question":"2+2?","options":["3","4","5"],"correct":"B"}]');
   let list;
@@ -245,6 +250,12 @@ $('addQs').onclick = guard(async () => {
 });
 const MAX_FILE_BYTES = 40 * 1024 * 1024;
 const cid = () => $('course').value;
+// Returns true (after telling the admin what to do) when no course is selected.
+function noCourse() {
+  if (cid()) return false;
+  say((window.courses || []).length ? 'Select a course in the Course dropdown first.' : 'There are no courses yet. Create one in the "Add a new course" box at the top first, then add files or questions.');
+  return true;
+}
 
 function statusText(m) {
   if (m.status === 'ready') return `ready (${(m.chars || 0).toLocaleString()} characters)`;
@@ -264,6 +275,7 @@ async function loadMaterials() {
 
 $('upload').onclick = guard(async () => {
   const files = [...$('file').files];
+  if (noCourse()) return;
   if (!files.length) return say('Choose one or more files first.');
   const log = [];
   for (const f of files) {
@@ -279,19 +291,23 @@ $('upload').onclick = guard(async () => {
   }
   $('file').value = '';
   $('uploadLog').textContent = log.join(' | ');
-  say('Upload finished. Modules appear below and become "ready" when they have been read.');
+  const okCount = log.filter((x) => /: uploaded$/.test(x)).length;
+  say(okCount ? `${okCount} of ${files.length} file(s) uploaded. Modules appear below and become "ready" when they have been read.` : 'No file was uploaded. See the reason next to each file name.');
 });
 $('mods').onclick = guard(async (e) => {
+  if (noCourse()) return;
   const gen = e.target.dataset?.gen, del = e.target.dataset?.delmod;
   if (del) { await api('DELETE', `/api/admin/courses/${cid()}/materials/${del}`); say('Module removed. Questions already created from it are kept.'); await loadCourses(); }
   if (gen) await startGeneration(gen);
 });
 $('clearMat').onclick = guard(async () => {
+  if (noCourse()) return;
   if (!confirm('Remove all modules for this course? Questions already created are kept.')) return;
   await api('DELETE', `/api/admin/courses/${cid()}/materials`);
   say('All modules removed.'); await loadCourses();
 });
 async function startGeneration(materialId) {
+  if (noCourse()) return;
   try {
     await api('POST', `/api/admin/courses/${cid()}/generate`, { target: +$('g-count').value, optionCount: +$('g-opts').value, materialId });
   } catch (e) {

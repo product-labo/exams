@@ -503,7 +503,7 @@ setInterval(() => q(`DELETE FROM exam_results WHERE paid_at IS NULL AND expires_
 // Public result pages live at /<wallet address>.
 app.get(/^\/0x[0-9a-fA-F]{40}$/, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'wallet.html')));
 
-app.use((_req, res) => res.status(404).json({ error: 'not found' }));
+app.use((req, res) => res.status(404).json({ error: `Not found: ${req.method} ${req.path}` }));
 
 const PORT = Number(process.env.PORT || 3000);
 app.listen(PORT, () => console.log('Voice exam backend on :' + PORT));
