@@ -1,7 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pool, q } from './db.js';
+import { pool, q, initDb } from './db.js';
 import { interpretWithLLM, pickInterpretation, narrate, generateQuestions, llmConfigured } from './agent.js';
 import { runGeneration } from './jobs.js';
 import { createNonce, verifyLogin, readToken } from './auth.js';
@@ -10,7 +10,10 @@ import { ethers } from 'ethers';
 
 const UNPAID_DAYS = Number(process.env.UNPAID_EXPIRY_DAYS || 5);
 
+await initDb(); // wait for Postgres and create the schema on a fresh database
+
 const app = express();
+app.set('trust proxy', 1); // behind Render/other proxies, so rate limits see the real client address
 app.use(express.json({ limit: '60mb' }));
 const PUBLIC_DIR = process.env.PUBLIC_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 app.use(express.static(PUBLIC_DIR));

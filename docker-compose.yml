@@ -14,7 +14,7 @@ services:
       interval: 3s
       retries: 20
   backend:
-    build: ./backend
+    build: .
     env_file: .env
     environment:
       DATABASE_URL: postgres://exam:exam@db:5432/exam

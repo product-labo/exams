@@ -40,6 +40,20 @@ docker compose up -d --build
 
 Configuration is described in [.env.example](.env.example). `GEMINI_API_KEY` is optional: without it the app works, but AI question generation is off.
 
+## Deploy to Render
+
+The app is one Node server plus Postgres, so it runs on Render as a Docker web service. The root [Dockerfile](Dockerfile) builds the backend and the web pages together, and [render.yaml](render.yaml) describes the service and database. The schema is created automatically on first start.
+
+1. Push this repository to GitHub.
+2. In Render: **New → Blueprint**, pick the repository. Render reads `render.yaml`.
+3. When prompted, set `ADMIN_WALLET` (public address), `CONTRACT_ADDRESS` (your deployed ResultRegistry) and optionally `GEMINI_API_KEY`. `SESSION_SECRET` is generated for you. `ANCHOR_PRIVATE_KEY` is **not** needed on Render, because the running app never signs transactions.
+4. Open the service URL. It is HTTPS, which browsers require for the microphone and wallet login.
+
+Notes:
+- Use a paid web plan for real use. Free services sleep when idle, and OCR plus AI generation need roughly 1 GB of memory. A restart stops a running upload or generation job; the app marks it failed and you simply start it again.
+- Render's free Postgres expires after a period. Use a paid database or an external one (Neon, Supabase) and set `DATABASE_SSL=true` with its connection string as `DATABASE_URL`.
+- **Vercel is not suitable for the backend.** It runs short-lived serverless functions, while this app needs minutes-long background jobs, uploads larger than Vercel's request limit, and in-memory login state. Host the whole app on Render (or any Docker host).
+
 ## Smart contract
 
 `contracts/src/ResultRegistry.sol` takes `(USDC address, treasury, fee)`. A student calls `payAndAnchor(resultHash)`: the fee is pulled to the treasury and the hash is recorded with the payer's address.
