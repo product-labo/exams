@@ -15,12 +15,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * An advisory lock keeps two instances starting together from both creating it.
  */
 export async function initDb() {
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL is not set. Create a Postgres database and add its connection URL to this service as the DATABASE_URL environment variable.');
+  }
   let client;
   for (let attempt = 1; ; attempt++) {
     try { client = await pool.connect(); break; }
     catch (e) {
-      if (attempt >= 30) throw new Error('Database is not reachable: ' + e.message);
-      console.log(`Waiting for the database (${attempt}/30)…`);
+      // Node reports several failed addresses as an AggregateError with an empty message, so show the real causes.
+      const why = e.message || (e.errors || []).map((x) => x.message).filter(Boolean).join('; ') || e.code || 'unknown reason';
+      if (attempt >= 30) throw new Error('Database is not reachable: ' + why);
+      console.log(`Waiting for the database (${attempt}/30): ${why}`);
       await sleep(2000);
     }
   }
