@@ -38,9 +38,22 @@
     <button class="primary" id="approveTop" style="display:none"></button>
   </div>
 
+  <div class="card" style="border-left:4px solid var(--accent)">
+    <h2>Add a new course</h2>
+    <div style="color:var(--muted);margin-bottom:8px">This creates a <b>separate</b> course and never changes an existing one. Then upload its files or questions below.</div>
+    <div class="grid">
+      <div><label>Title</label><input id="n-title" placeholder="e.g. Marketing Basics"></div>
+      <div><label>Questions per exam</label><input id="n-num" type="number" value="10"></div>
+      <div><label>Exam time (min)</label><input id="n-mins" type="number" value="5"><div id="n-hint" style="font-size:12px;margin-top:4px"></div></div>
+      <div><label>Seconds per question</label><input id="n-spq" type="number" value="15"></div>
+      <div><label>Repeats allowed</label><input id="n-rep" type="number" value="1"></div>
+    </div>
+    <button class="primary" id="createCourse">Create course</button>
+  </div>
+
   <div class="card">
-    <h2>Course settings</h2>
-    <div id="editing" style="color:var(--muted);margin-bottom:8px">Pick a course in the Questions box to edit it here, or type a new title and create a new course.</div>
+    <h2>Edit selected course</h2>
+    <div id="editing" style="color:var(--muted);margin-bottom:8px">Pick a course in the Questions box to edit it here.</div>
     <div class="grid">
       <div><label>Title</label><input id="c-title" placeholder="XYZ"></div>
       <div><label>Questions per exam</label><input id="c-num" type="number" value="10"></div>
@@ -48,7 +61,7 @@
       <div><label>Seconds per question</label><input id="c-spq" type="number" value="10"></div>
       <div><label>Repeats allowed</label><input id="c-rep" type="number" value="1"></div>
     </div>
-    <button class="primary" id="saveCourse">Save changes to selected course</button><button id="addCourse">Create as new course</button>
+    <button class="primary" id="saveCourse">Save changes to this course</button> <span style="color:var(--muted);font-size:14px">To add a different course, use "Add a new course" above.</span>
   </div>
 
   <div class="card">
@@ -183,7 +196,7 @@ function syncCourse() {
     $('c-spq').value = c.seconds_per_question; $('c-rep').value = c.max_repeats;
     if (typeof updateTimeHint === 'function') updateTimeHint();
     }
-    $('editing').textContent = `Editing "${c.title}". Change the values and press Save, or change the title and press "Create as new course".` +
+    $('editing').textContent = `Editing "${c.title}". Changing the values below and pressing Save updates THIS course.` +
       (c.approved === 0 ? ' Students cannot see this course yet: it has no approved questions.' : '');
   }
 }
@@ -192,16 +205,35 @@ $('qs').onclick = guard(async (e) => { const id = e.target.dataset?.del; if (id)
 const ruleBody = () => ({ title: $('c-title').value.trim(), numQuestions: +$('c-num').value, examSeconds: Math.round(+$('c-mins').value * 60), secondsPerQuestion: +$('c-spq').value, maxRepeats: +$('c-rep').value });
 $('saveCourse').onclick = guard(async () => {
   if (!cid()) return say('Select a course first.');
+  const current = (window.courses || []).find((x) => String(x.id) === cid());
+  if (current && ruleBody().title !== current.title &&
+      !confirm(`This will RENAME the course "${current.title}" to "${ruleBody().title}". It will not create a new course.\n\nTo add a different course press Cancel and use the "Add a new course" box.\n\nRename it?`)) return;
   await api('PUT', `/api/admin/courses/${cid()}`, ruleBody());
   say('Course settings saved.'); formFor = null; await loadCourses();
 });
-$('addCourse').onclick = guard(async () => {
-  if (!$('c-title').value.trim()) { $('c-title').focus(); return say('Type a course title first (the grey XYZ is only an example).'); }
-  const created = await api('POST', '/api/admin/courses', { title: $('c-title').value.trim(), numQuestions: +$('c-num').value, examSeconds: Math.round(+$('c-mins').value * 60),
-    secondsPerQuestion: +$('c-spq').value, maxRepeats: +$('c-rep').value });
-  say('Course created and selected.'); formFor = null; await loadCourses();
+// ---- creating a course is its own action, separate from editing the selected one ----
+function updateNewHint() {
+  const n = +$('n-num').value, spq = +$('n-spq').value, mins = +$('n-mins').value;
+  const need = Math.ceil((n * spq) / 60);
+  const ok = mins >= need;
+  $('n-hint').style.color = ok ? 'var(--muted)' : 'var(--bad)';
+  $('n-hint').textContent = ok ? `Minimum for ${n} questions: ${need} min (reading time not counted)` : `Too short: ${n} questions at ${spq} s need at least ${need} min`;
+}
+for (const id of ['n-num', 'n-mins', 'n-spq']) $(id).addEventListener('input', updateNewHint);
+updateNewHint();
+
+$('createCourse').onclick = guard(async () => {
+  const title = $('n-title').value.trim();
+  if (!title) { $('n-title').focus(); return say('Type a title for the new course first.'); }
+  const created = await api('POST', '/api/admin/courses', { title, numQuestions: +$('n-num').value, examSeconds: Math.round(+$('n-mins').value * 60),
+    secondsPerQuestion: +$('n-spq').value, maxRepeats: +$('n-rep').value });
+  $('n-title').value = '';
+  formFor = null; await loadCourses();
   $('course').value = String(created.id); formFor = null; syncCourse(); await loadQuestions(); await loadMaterials();
+  say(`Course "${created.title}" created and selected. Now upload its files or paste its questions below. Your other courses were not changed.`);
+  $('course').scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
+
 $('addQs').onclick = guard(async () => {
   const text = $('json').value.trim();
   if (!text) return say('The box is empty. Paste your questions as JSON first, for example: [{"question":"2+2?","options":["3","4","5"],"correct":"B"}]');
